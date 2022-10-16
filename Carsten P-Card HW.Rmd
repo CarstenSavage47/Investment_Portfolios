@@ -1,0 +1,306 @@
+---
+title: "Module_3_P_card_setup"
+author: "George Batta"
+date: "3/3/2021"
+output: html_document
+---
+
+# Loading and setup
+This loads the 6 years of data and stores them in a list object called `data`.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(htmlwidgets)
+
+
+# create a list from these files
+# This lists out the names of files with .csv at the end
+filenames<-list.files(path="data",pattern=".csv$")
+
+
+# create an empty list that will serve as a container to receive the incoming files
+data<-list()
+
+# create a loop to read in your data
+for (i in 1:length(filenames)) {
+  data[[i]]<-as_tibble(read_csv(paste(getwd(),"/data/",filenames[i],sep="")))
+}
+
+
+# add the names of your data to the list
+names(data)<-filenames
+```
+
+
+This code chunk prints out the column names in each year of data.
+
+```{r Column names}
+i=2010
+#Column heading cleanup
+for (n in data) {
+  print(paste("DATA FROM",i,"BELOW"))
+  print(colnames(n))
+  i=i+1
+}
+
+
+
+for (i in 1:length(data)) {
+  colnames(data[[i]]) <- c("Agency_Number","Agency_Name","Cardholder_Last_Name","Cardholder_First_Initial","Description","Amount","Vendor","Transaction_Date","Posted_Date","MCC")
+}
+
+```
+
+Let's now set up our date format tagging and conversion functions
+```{r Set up conversion and tagging}
+date_case<-function(x) case_when(
+      	str_detect(x, "-")==TRUE ~ "A",
+  		  str_detect(x, "/")==TRUE  &
+		    !str_detect(x,"00$")==TRUE ~  "B",
+  	  	str_detect(x, "\\.")==TRUE ~ "C",
+  	  	str_detect(x, "/")==TRUE & str_detect(x,":")  ~ "D"
+)
+
+convert_date<-function(x) case_when(
+  str_detect(x,"-")==TRUE ~ dmy(x),
+  str_detect(x, "/")==TRUE  &
+	!str_detect(x,"00$")==TRUE ~  mdy(x),
+  str_detect(x, "\\.")==TRUE ~ as_date(dmy_hms(x)),
+  str_detect(x, "/")==TRUE & str_detect(x,":")  ~ as_date(mdy_hm(x))
+)
+
+
+```
+
+Now, execute!
+```{r Execute conversion and Tagging}
+for (i in 1:length(data)) {
+  data[[i]] <- data[[i]] %>% mutate(across(c(Transaction_Date,Posted_Date),
+                                      list(dc=date_case,conv=convert_date)))
+}
+
+```
+
+Check frequency of cases among all datasets
+```{r Frequency of date cases}
+
+date_case_combined<-data[[1]] %>% 
+  select(Transaction_Date_dc,Transaction_Date) 
+
+for (i in 2:length(data)) {
+  temp<-data[[i]] %>% select(Transaction_Date_dc,Transaction_Date)  
+  date_case_combined<-bind_rows(date_case_combined,temp)
+}
+date_case_combined<-date_case_combined %>% arrange(Transaction_Date_dc)
+
+date_case_combined %>% 
+  group_by(Transaction_Date_dc) %>% 
+  summarize(n=n()) %>% 
+  mutate(prop=n/sum(n))
+
+```
+
+```{r Merge years}
+
+data[[5]]<-data[[5]] %>% mutate(Amount=as.character(Amount))
+
+p_card_combined<-bind_rows(data)
+```
+
+
+Below, we'll use the `gsub()` command, which has 3 arguments. The syntax is: 
+
+gsub(Regex for finding a pattern or specific characters,
+  What you want to substitute in, 
+  The column or object you want to perform the substitution on)
+
+We'll then convert Amount to a number, and then dump our intermediate variables...`Transaction Date` and `Posted Date` are the original, character versions of the date variables.
+
+```{r Final cleanup}
+
+p_card_combined <-p_card_combined %>% 
+  mutate(Amount=gsub("[$,)]", "", Amount)) %>% 
+  mutate(Amount=gsub("\\(", "-", Amount)) %>%
+  mutate(Amount=as.numeric(Amount)) %>%
+  select(-c(Transaction_Date,Posted_Date,
+            Transaction_Date_dc,Posted_Date_dc)) %>% 
+  rename(Transaction_Date=Transaction_Date_conv) %>% 
+  rename(Posted_Date=Posted_Date_conv) 
+
+
+#The following statement should be true
+sum(is.na(p_card_combined$Transaction_Date))==sum(is.na(date_case_combined$Transaction_Date))
+
+#Dump all but p_card_combined
+remove(list=c("data","n","temp","i","filenames","date_case_combined"))
+
+
+osu14<-p_card_combined %>% 
+  filter(Agency_Name=="OKLAHOMA STATE UNIVERSITY") %>% 
+  drop_na(Transaction_Date) %>% 
+  filter(year(Transaction_Date)==2014) %>% 
+  select(-c(Agency_Name,Agency_Number))
+
+```
+
+
+
+```{r Benford}
+#Benford examples:
+
+osu14 %>% filter(Amount<100 & Amount>=0) %>% ggplot()+
+  geom_histogram(mapping=aes(x=Amount))+geom_vline(xintercept=20)+geom_vline(xintercept=10)
+
+osu14 %>% filter(Amount<1000 & Amount>=100) %>% ggplot()+
+  geom_histogram(mapping=aes(x=Amount))+geom_vline(xintercept=200)+geom_vline(xintercept=100)
+
+osu14 %>% filter(Amount<10000 & Amount>=1000) %>% ggplot()+
+  geom_histogram(mapping=aes(x=Amount))+geom_vline(xintercept=2000)+geom_vline(xintercept=1000)
+
+```
+
+
+```{r IC1}
+#IC 1
+osu14 %>% group_by(Cardholder_First_Initial,Cardholder_Last_Name) %>% 
+  summarize(Amount=sum(Amount)) %>% filter(Amount>50000) %>% arrange(-Amount)
+```
+
+
+```{r IC2}
+#IC 2
+osu14 %>% mutate(month=month(Transaction_Date)) %>% group_by(Cardholder_First_Initial,Cardholder_Last_Name,month) %>% 
+  summarize(Amount=sum(Amount)) %>% filter(Amount>10000) %>% arrange(month,-Amount)
+```
+
+
+```{r IC3}
+#IC 3
+osu14 %>% group_by(Cardholder_First_Initial,Cardholder_Last_Name,Vendor,Transaction_Date) %>% 
+  mutate(Daily_Amount=sum(Amount)) %>% mutate(count=n()) %>%  filter(count>1 & Daily_Amount>5000) %>% 
+  arrange(Transaction_Date,Cardholder_First_Initial,Cardholder_Last_Name,Vendor)
+
+```
+
+```{r Benford Analysis Package}
+pacman::p_load(benford.analysis)
+benford(osu14$Amount,number.of.digits=1,sign="both",discrete=TRUE,round=3)
+```
+
+```{r HWQ1}
+osu14$Amount <- as.character(osu14$Amount)
+
+osu14filter <- osu14 %>% filter(Amount > 1.0 | Amount < -1.0)
+
+Num1 <- str_count(osu14filter$Amount,"^1")
+count1 <- length(which(Num1 == 1))
+count1
+
+Num2 <- str_count(osu14filter$Amount,"^2") 
+count2 <- length(which(Num2 == 1))
+count2
+
+Num3 <- str_count(osu14filter$Amount,"^3")
+count3 <- length(which(Num3 == 1))
+count3
+
+Num4 <- str_count(osu14filter$Amount,"^4")
+count4 <- length(which(Num4 == 1))
+count4
+
+Num5 <- str_count(osu14filter$Amount,"^5")
+count5 <- length(which(Num5 == 1))
+count5
+
+Num6 <- str_count(osu14filter$Amount,"^6") 
+count6 <- length(which(Num6 == 1))
+count6
+
+Num7 <- str_count(osu14filter$Amount,"^7")
+count7 <- length(which(Num7 == 1))
+count7
+
+Num8 <- str_count(osu14filter$Amount,"^8")
+count8 <- length(which(Num8 == 1))
+count8
+
+Num9 <- str_count(osu14filter$Amount,"^9")
+count9 <- length(which(Num9 == 1))
+count9
+
+FirstCol <- c(count1,count2,count3,count4,count5,count6,count7,count8,count9)
+SecondCol <- c(1,2,3,4,5,6,7,8,9)
+Numdf <- data.frame(SecondCol,FirstCol) %>% mutate(Sum=sum(FirstCol)) %>%
+  mutate(prop=(FirstCol/Sum)*100) %>%
+  mutate(across(prop,round,3)) %>%
+  rename("Leading Digit"="SecondCol") %>%
+  rename("Frequency"="FirstCol") %>%
+  rename("Proportion %"="prop")
+Numdf
+```
+It looks like there is likely no evidence of fraud using the Benford Analysis method. The frequencies of each leading digit in the financial transaction dataset are too similar to the optimal leading digit frequencies (as proposed by Benford) to warrant further investigation. 
+```{r HWQ1.5}
+BenfordTable <- read_csv("/Users/carstenjuliansavage/Desktop/R Working Directory/Accounting/Accounting Data Analytics/Data Files/P-Card/benford_frequencies.csv")
+BenfordTable %>%
+rename("Leading Digit" = "leading_digit") %>%
+rename("Expected Frequency" = "expected_frequency") %>%
+mutate(`Proportion %`=(`Expected Frequency`)*100)
+```
+
+```{r HWQ2}
+osu14 %>%
+group_by(Cardholder_First_Initial,Cardholder_Last_Name,Amount,Vendor,Transaction_Date) %>%
+mutate(Count=n()) %>%
+filter(Count>1) %>%
+arrange(Transaction_Date,Vendor)
+```
+
+```{r HWQ3}
+osu14$Amount <- as.character(osu14$Amount)
+osu14 %>%
+group_by(Cardholder_First_Initial,Cardholder_Last_Name,Amount,Transaction_Date) %>%
+mutate(Count=n()) %>%
+ungroup() %>%
+group_by(Cardholder_Last_Name, Cardholder_First_Initial) %>%
+summarize(TotalCount=sum(Count)) %>%
+arrange(desc(TotalCount))
+```
+
+```{r HWQ4}
+osu14$Amount <- as.character(osu14$Amount)
+#separate(Amount, into=c("Dollars","Cents"),sep=".",convert=TRUE) #No amounts with cents exist, so this is not needed
+osu14 %>% 
+mutate(`Round Amount?`=ifelse(str_detect(osu14$Amount,".000$"),"Round","Not Round")) %>%
+filter(`Round Amount?`=="Round") %>%
+arrange(Vendor,Cardholder_Last_Name,Cardholder_First_Initial)
+
+
+```
+
+```{r HW3, Q5}
+# Homework 3, Q1
+
+# Making sure that we can merge the two tables
+benford_frequencies <- read.csv(file='benford_frequencies.csv') %>% as_tibble()
+benford_frequencies <- benford_frequencies %>% 
+  mutate(leading_digit = as.character(leading_digit))
+
+freq_table <- osu14 %>% 
+  filter(Amount > 1.00) %>% 
+  mutate(leading_digit = str_sub(Amount, 1, 1)) %>% 
+  group_by(leading_digit) %>% 
+  summarize(n = n()) %>% 
+  mutate(prop = n/sum(n)) %>% 
+  mutate(across(prop, round, 3))
+
+freq_table %>% left_join(benford_frequencies) %>%
+    rename("Leading Digit"="leading_digit") %>%
+  rename("Expected Frequency"="expected_frequency") %>%
+  rename("Proportion"="prop")
+```
+

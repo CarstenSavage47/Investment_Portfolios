@@ -1,0 +1,180 @@
+---
+title: "Midterm 2 - SP21"
+author: "George Batta"
+student: "Carsten Savage"
+date: "4/13/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(lubridate)
+library(ggrepel)
+library(viridis)
+
+stock_returns <-  as_tibble(read_csv('Ec160_SP21_MT2.csv'),
+                         col_names=TRUE) %>%  
+                  mutate(Market_cap=abs(PRC)*SHROUT) %>% 
+                  filter(is.na(Market_cap)==FALSE) %>% 
+                  mutate(RET=RET*100)
+
+sic<- as_tibble(read_csv('SIC_codes.csv'),col_names=TRUE) %>% 
+  rename(SICCD=SIC)
+
+stock_returns<-stock_returns %>% left_join(sic)
+
+```
+
+
+Please place your answers in the code chunks below. 
+
+```{r Q1}
+stock_returns %>%
+  mutate(Date=as_date(dmy(date))) %>%
+select(-date) %>%
+  mutate(vwretd=as.character(vwretd)) %>%
+  str_remove_all(vwretd, "%") %>% #Command not working for some reason
+  str_remove_all(vwretd, ",") %>% #Command not working for some reason
+mutate(vwretd=as.numeric(vwretd))
+
+
+
+```
+
+```{r Q2}
+stock_returns %>%
+  mutate(Date=as_date(dmy(date))) %>%
+select(-date) %>%
+  mutate(Holding= case_when(
+    str_detect(COMNAM, "HOLDINGS|HOLDING|HLDGS|GROUP")==TRUE ~ "HOLDING"
+    )) %>%
+    filter(Holding=="HOLDING")
+
+```
+
+
+
+```{r Q3}
+
+sic <- as.tibble(sic) %>% mutate(SICCD=as.numeric(SICCD))
+
+stock_returns %>%
+  mutate(Date=as_date(dmy(date))) %>%
+select(-date) %>%
+  mutate(Liq_flag=case_when(
+    str_detect(DLSTCD, "^4")==TRUE ~ "Liquidation")) %>%
+filter(Liq_flag != "NA") %>%
+mutate(SICCD=as.numeric(SICCD)) %>%
+  left_join(sic)
+
+stock_returns %>%
+  filter(SICCD==6726)
+
+```
+
+
+```{r Q4}
+Benford <- read.csv("/Users/carstenjuliansavage/Desktop/R Working Directory/Accounting/Accounting Data Analytics/Data Files/Midterm 2/benford_frequencies.csv") %>% as_tibble() %>% rename("Leading_Digit"="leading_digit") %>% mutate(Leading_Digit=as.numeric(Leading_Digit))
+
+stock_returns %>%
+  mutate(RET=as.numeric(RET)) %>%
+  filter(RET>abs(.1) & RET!=1) %>%
+  mutate(Leading_Digit=case_when(
+    str_detect(RET,"^-")==TRUE ~ str_sub(RET, 1, 2),
+     str_detect(RET, "^[0-9]")==TRUE ~ str_sub(RET, 1, 1))) %>%
+  group_by(Leading_Digit) %>%
+  summarize(n=n()) %>%
+  mutate(Proportion=n/sum(n)) %>%
+  filter(Leading_Digit != 0) %>%
+  mutate(Leading_Digit=as.numeric(Leading_Digit)) %>%
+  left_join(Benford)
+
+```
+According to the Benford Frequencies provided by Prof Batta, there may be some inconsistencies concerning the proportion of digits in this df and the proportion of digits in the optimal Benford freq df. However, this may be due to a problem with my code potentially not capturing negative values. Overall, it looks similar enough to not be cause for concern.
+```{r 243234, echo=FALSE}
+stock_returns %>%
+  mutate(RET=as.numeric(RET)) %>%
+  filter(RET>abs(.1) & RET!=1) %>%
+  mutate(Leading_Digit=case_when(
+    str_detect(RET,"^-")==TRUE ~ str_sub(RET, 1, 2),
+     str_detect(RET, "^[0-9]")==TRUE ~ str_sub(RET, 1, 1))) %>%
+  group_by(Leading_Digit) %>%
+  summarize(n=n()) %>%
+  mutate(Proportion=n/sum(n)) %>%
+  filter(Leading_Digit != 0)
+```
+For Question 5, you should add to the dplyr sequence below.
+
+```{r Q5}
+
+stock_returns %>% 
+  filter(is.na(Description)==FALSE & SICCD!=6726) %>% 
+  group_by(COMNAM) %>% 
+    mutate(ret_plus=(1+RET/100),
+           Cumulative_Returns = 100*(prod(ret_plus, lag(ret_plus, 11), na.rm = T) -1) ) %>% select(-ret_plus) %>% 
+  ungroup() %>%
+  group_by(Description) %>%
+  mutate(Count=n()) %>% 
+  #summarize(Prop=n/sum(n)) %>% distinct(c(Prop))
+  summarize(AvCReturn=mean(Cumulative_Returns),Count) %>%
+  distinct(AvCReturn,Count) %>%
+  mutate(Description=as.factor(Description)) %>%
+  mutate(Description=fct_lump(Description, 10)) %>% # Not working for whatever reason
+  arrange(desc(Count)) %>%
+  filter(Count>10) %>%
+  ggplot(aes(AvCReturn,fct_reorder(Description))) + 
+  geom_point()
+
+```
+
+
+For Question 6, you should work with the `financials_top_5` dataframe.   
+
+```{r Q6, fig.height=4,fig.width=10,fig.align="center"}
+
+month_levels=c("JAN","DEC")
+
+financials<-stock_returns %>% 
+  filter((SICCD>=6011 & SICCD<6099) | 
+           (SICCD>=6111 & SICCD<=6163) | 
+           SICCD==6211 | SICCD==6712) %>% 
+  group_by(COMNAM) %>% 
+  mutate(ret_plus=(1+RET/100),
+         Cumulative_Returns = 100*(prod(ret_plus, lag(ret_plus, 11), na.rm = T) -1) ) %>% select(-ret_plus) 
+
+mean_cumulative=mean(financials$Cumulative_Returns) 
+
+financials_top_5 <- financials %>% 
+  mutate(PRC=abs(PRC)) %>% 
+  group_by(COMNAM) %>% 
+  mutate(market_cap_ave=mean(Market_cap,na.rm=TRUE)) %>% 
+  ungroup() %>% 
+  arrange(desc(market_cap_ave)) %>% 
+  slice(1:60) 
+  
+
+library(grid)
+library(gridExtra)
+pacman::p_load(directlabels)
+library(scales)
+
+financials_top_5 %>%
+    mutate(Date=as_date(dmy(date))) %>%
+  select(-date) %>%
+  mutate(Month=as.numeric(substring(Date,6,7))) %>%
+  distinct(Month,COMNAM,PRC) %>%
+  slice(1:60) %>%
+  ggplot(aes(x=Month,y=PRC)) +
+  geom_line(aes(color=COMNAM)) +
+  theme_minimal() + 
+  facet_wrap(~COMNAM, nrow=1) +
+  #scale_x_continuous(breaks=seq(1,12, by=12))
+  geom_label_repel(aes(label = (PRC)), label.size = NA) 
+  #scale_color_gradient2(midpoint=mean_cumulative[[1]],low="red", high="blue",mid="white") #This command doesn't seem to work due to var type
+
+
+```
+
+

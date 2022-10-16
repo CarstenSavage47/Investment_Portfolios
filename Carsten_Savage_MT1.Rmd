@@ -1,0 +1,78 @@
+---
+title: "Ec160 - MT1  - Section 1"
+author: "George Batta"
+date: "3/1/2021"
+output: html_document
+---
+
+```{r Setup midterm}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(knitr)
+#setwd("/Users/carstenjuliansavage/Desktop/R Working Directory/Accounting/Accounting Data Analytics/Data Files/Midterm 1")
+stock_returns<-as_tibble(read_delim("surprise_and_returns.csv",col_names=TRUE,delim=","))
+industry_names<-as_tibble(read_delim("industry_names.csv",col_names=TRUE,delim=","))
+```
+
+```{r Question 1}
+stock_returns %>% 
+group_by(year) %>%
+summarize(n=n()) %>%
+mutate(prop=n/sum(n)) %>%
+mutate(Percent=(n/sum(n))*100)
+```
+So 52.14% of the firm-years in the dataset are in 2018
+
+```{r Question 2}
+stock_returns %>%
+count(CUSIP,year,quarter) %>%
+filter(n>1)
+```
+Yes, this assumption was true. There are no combinations of CUSIP-year-quarter that come up more than once in the dataframe because we see no observations running the above command.
+```{r Question 2.5}
+stock_returns %>%
+count(CUSIP,year,quarter) %>%
+filter(n>0)
+```
+Checking to make sure that the code returned observations when n>0 
+```{r Question 3}
+options(scipen=999)
+
+NewStockReturns <- stock_returns %>%
+mutate(market_cap=((PRC*SHROUT)/1000000)) %>%
+filter(surprise < .1 & surprise > -.1) %>%
+left_join(industry_names)
+NewStockReturns
+```
+
+```{r Question 3.5}
+NewStockReturns %>%
+filter(surprise > 0.1 | surprise < -.1)
+```
+Checking to make sure code did not return values
+```{r Question 4}
+NewStockReturns %>%
+group_by(industry,year) %>%
+summarize(median_3_mo=median(three_mo_cumulative,na.rm=TRUE),mean_3_mo=mean(three_mo_cumulative,na.rm=TRUE)) %>%
+pivot_wider(names_from=year,values_from=c(median_3_mo:mean_3_mo)) %>%
+mutate(across(median_3_mo_2017:mean_3_mo_2018,round,3))
+```
+
+
+```{r Question 5}
+NewStockReturnsGraph <- NewStockReturns %>%
+mutate(BigCap = ifelse(market_cap>10,1,0))
+NewStockReturnsGraph
+
+ggplot(data=NewStockReturnsGraph) +
+aes(x=three_mo_cumulative) + 
+geom_histogram(fill="blue") + 
+facet_wrap(~BigCap) + 
+labs(x = "Three Month Cumulative Stock Returns", y = "Count", title = "Three Month Cumulative Stock Returns: Big Cap versus Small Cap", caption="1 if Big Cap, 0 if Small Cap") +
+theme_minimal()
+```
+```{r Question 5.5}
+NewStockReturnsGraph %>%
+filter(BigCap==1)
+```
+
