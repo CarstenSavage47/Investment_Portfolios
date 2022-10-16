@@ -1,0 +1,263 @@
+---
+title: "IntegrateCo - Homework"
+author: "George Batta"
+date: "2/24/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(readxl)
+library(knitr)
+library(lubridate)
+payroll_2015=as_tibble(read_delim("Analytics_mindset_case_studies_IntegrateCo_2015payroll.csv",col_names=TRUE,delim="|"))
+payroll_2016=as_tibble(read_delim("Analytics_mindset_case_studies_IntegrateCo_2016payroll.csv",col_names=T,delim="|"))
+job_codes=as_tibble(read_delim("Analytics_mindset_case_studies_IntegrateCo_jobcodes.csv",col_names=T,delim="|"))
+location=as_tibble(read_delim("Analytics_mindset_case_studies_IntegrateCo_locations.csv",col_names=T,delim="|"))
+
+
+#Extract job_code from 2015 data & Create Year variable
+payroll_2015<- payroll_2015 %>% mutate(sub=substring(Job,3,6)) %>% 
+  mutate(sub_tf=str_detect(sub,"^[a-zA-Z]")) %>% 
+  mutate(job_code=ifelse(sub_tf==TRUE,substring(Job,4,6),substring(Job,3,5))) %>% 
+  mutate(Year=2015) %>% select(-sub,-sub_tf)
+
+# Extract job_code from 2015 data & create Year variable
+# 14H010-> H010
+# 14010 -> 010
+
+payroll_2016<- payroll_2016 %>% mutate(sub=substring(Project,3,6)) %>% 
+  mutate(sub_tf=str_detect(sub,"^[a-zA-Z]")) %>% 
+  mutate(job_code=ifelse(sub_tf==TRUE,substring(Project,4,6),substring(Project,3,5))) %>% 
+  mutate(Year=2016) %>% select(-sub,-sub_tf)
+
+
+
+#Align variable names across the two datasets
+payroll_2016 <- payroll_2016 %>% 
+  rename(Job=Project ) %>% 
+  rename(Emp_No=Employee_Number) %>% 
+  rename(Reg_Hrs=Hours ) %>% 
+  rename(OT_Hrs=OT_Hours ) %>% 
+  rename(Fica_Medc=SocSec_Medicare) %>% 
+  rename(Futa=FUTA ) %>% 
+  rename(Suta=SUTA )
+
+
+# Check on primary key assumptions given in case!!
+# Pg. 2: "Each row represents a unique employee, 
+# job code, and pay date/payroll_id combination."
+
+
+payroll_2015 %>% count(First_Name,Last_Name,Payroll_ID,Job) %>% filter(n>1)
+
+
+inspect <- payroll_2015 %>% filter(First_Name=="Cindy" & Last_Name=="Lunt") 
+
+
+inspect<-payroll_2015 %>% filter(First_Name=="Cindy" & Last_Name=="Lunt") %>% 
+  arrange(Pay_Date,Payroll_ID,Job)
+
+# I can also inspect specific rows to make it easier to see what went wrong
+payroll_2015 %>% count(Payroll_ID,First_Name,Last_Name,Job) %>% filter(n>1) 
+
+inspect<-payroll_2015 %>% filter(First_Name=="Maryann" & Last_Name=="Cohen" & Job=="15H001B" & Payroll_ID=="27310006") 
+
+
+
+# To align with 2016 presentation, let's sum up all pay-related variables, for the same set of other characteristics,
+# using group_by (for non-wage variables) and summarize (for to-be-summed wage variables):
+# Lastly, I ungroup() at the end...otherwise, I might get unexpected groupings for 
+# later statistics I calculate!
+
+payroll_2015<-payroll_2015 %>% 
+  group_by(Home_Div,Work_Div,Payroll_ID,Pay_Date,First_Name,Last_Name,Job,Emp_No,Year,job_code) %>% 
+  summarize(across((Reg_Hrs:Work_Comp),sum,na.rm = TRUE)) %>% 
+  ungroup()
+
+# Pithier version of above, where I use group_by(across()) to 
+# exclude variables from grouping
+
+payroll_2015<-payroll_2015 %>% 
+  group_by(across(-(Reg_Hrs:Work_Comp))) %>% 
+  summarize(across((Reg_Hrs:Work_Comp),sum,na.rm = TRUE)) %>% 
+  ungroup()
+
+
+# Check for duplicates. Yay, none!!
+payroll_2015 %>% count(Payroll_ID,First_Name,Last_Name,Job) %>% filter(n>1) 
+
+
+
+# All variables in 2016: Seems like ther are missing employee id information!
+# Will just keep these in dataset, for now.
+payroll_2016 %>%  count(Employee_Name,Emp_No,Job) %>% filter(n>1)
+
+
+#Bind the rows together
+payroll_total<-bind_rows(payroll_2015,payroll_2016)
+
+
+
+# STUDENT EXERCISE
+#Replace Gross_Wages with sum of Reg_Pay and OT_Pay if it's missing
+#   i.e., is.na(Gross_WAGES)==TRUE
+#Create Total_Hours variable
+
+#But first, pull together first and last name in 2016 data with unite()
+
+payroll_total <-payroll_total %>% 
+  unite(Employee_Name1,c(First_Name,Last_Name),sep=" ") %>% 
+  mutate(Employee_Name=ifelse(is.na(Employee_Name)==TRUE,Employee_Name1 ,Employee_Name)) %>% 
+  mutate(Gross_Wages=ifelse(is.na(Gross_Wages),Reg_Pay+OT_Pay,Gross_Wages)) %>% 
+  mutate(Total_Hours=Reg_Hrs+OT_Hrs) %>% 
+  mutate(Gross_Pay_Per_Hour=Gross_Wages/Total_Hours) %>% select(-Employee_Name1)
+
+
+
+# Merge in job_codes  
+job_codes<-job_codes %>% rename(job_code=Job_Code)
+
+
+payroll_total <- payroll_total   %>% left_join(job_codes)  
+
+# This gets me the sum of NA-valued Job_Description rows
+payroll_total %>% summarize(count_na=sum(is.na(Job_Description)))
+# This returns for me NA-valued rows
+payroll_total %>% filter(is.na(Job_Description)==TRUE)
+
+
+payroll_total %>% distinct(job_code)
+job_codes %>% distinct( job_code)
+
+# Weird job_code that doesn't show up in the job_codes file. Let's filter it out.
+payroll_total <- payroll_total %>% filter(job_code!="144")  
+
+payroll_total %>% distinct(job_code)
+
+
+# Homework short answers: 
+# First, good to convert Pay_Date to a date variable
+payroll_total <- payroll_total %>% mutate(Pay_Date= mdy(Pay_Date))
+
+```
+
+##Homework questions
+
+```{r Q1}
+
+# Question 1
+payroll_total %>% filter(Year==2015  ) %>% 
+  group_by(Employee_Name,Emp_No) %>% 
+  summarize(across(c(OT_Hrs,OT_Pay),sum,na.rm = TRUE)) %>% 
+  filter(OT_Pay>0.0) %>% 
+  arrange(-OT_Pay)
+```
+
+
+```{r Q2}
+#Question 2
+payroll_total %>% 
+  filter(Year==2015) %>% 
+  group_by(job_code,Job_Description) %>% 
+  summarize(across(c(OT_Hrs,OT_Pay),sum,na.rm = TRUE)) %>% 
+  arrange(-OT_Pay,Job_Description)
+```
+
+
+```{r Q3}
+#Question 3
+payroll_total %>% filter(Year==2015 ) %>% 
+  group_by(Employee_Name,Pay_Date) %>% 
+  summarize(across(c(Reg_Hrs,OT_Hrs), sum,na.rm = TRUE)) %>% 
+  filter(Reg_Hrs<40.0 & OT_Hrs>0.0) %>% 
+  arrange(Employee_Name,Pay_Date)
+```
+
+
+```{r Q4}
+#Question 4
+payroll_total %>% 
+  inner_join(location) %>% 
+  group_by(Location,Year) %>% 
+  summarize(across(c(Gross_Wages,Total_Hours),sum,na.rm=TRUE)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from=Year,values_from=(-(Location:Year))) %>% 
+  mutate(Ave_Pay_15=Gross_Wages_2015/Total_Hours_2015) %>% 
+  mutate(Ave_Pay_16=Gross_Wages_2016/Total_Hours_2016) %>% 
+  mutate(across(c(Gross_Wages_2015:Ave_Pay_16),round,2))
+
+```
+
+```{r Q4 Practice}
+payroll_total %>%
+full_join(location) %>%
+group_by(Location,Year) %>%
+summarize(across(c(Gross_Wages,Total_Hours,Reg_Hrs,OT_Hrs),sum,na.rm=TRUE)) %>%
+ungroup() %>%
+pivot_wider(names_from=Year,values_from=c(Reg_Hrs:OT_Hrs,Gross_Wages:Total_Hours)) %>%
+mutate(AveragePay2015=Gross_Wages_2015/Total_Hours_2015) %>%
+mutate(AveragePay2016=Gross_Wages_2016/Total_Hours_2016) %>%
+na.omit() %>%
+mutate(across(c(AveragePay2015:AveragePay2016),round,2))
+```
+
+
+# Additional questions 
+```{r Q5}
+payroll_total   %>% 
+  filter(Year==2016) %>% 
+  mutate(sum_pay=Gross_Wages+Futa+Suta+Fica_Medc+Work_Comp) %>% 
+  summarize(sum_pay_2016=sum(sum_pay,na.rm=TRUE))
+```
+
+```{r Q6}
+payroll_total %>% filter(Year==2016 & is.na(Emp_No)==TRUE) %>% 
+  summarize(total_na_16=n(),total_na_gross_wages=sum(Gross_Wages))  
+```
+
+**Question 7**
+
+This was definitely the most challenging one. You don't have to do it the exact way I did it below, but I've tried to make this answer as DRY as possible. 
+
+Note that I included one additional option in `pivot_wider()`:
+
+`values_fill`. I found this in the documentation for `pivot_wider()` This option tells `pivot_wider()` to code missing values in the `perc` variable as equal to zero. I could do this later via another `mutate()`, but it's quicker to do it this way.
+
+One other thing: Note that the `group_by(Employee_Name,job_code)` affects the next two `summarize()` and `mutate()` commands. All subsequent summarize and mutates will be affected by this grouping, until I `ungroup()` it or set `group_by()` again. The other thing to note is that after the `summarize()` command, the data  are grouped by `Employee_Name` only (you can see this by running everything up and and including summarize; in the output, you can see "Groups: Employee_Name"). After `summarize()`, `group_by()` will default to grouping by the first variable you put in the `group_by()`. So the ordering does matter. Why doesn't it retain grouping by both `Employee_Name` and `job_code`? Since those two variables uniquely identify each row, there's nothing you can aggregate by grouping by those two anymore!
+
+```{r Q7}
+payroll_total %>% 
+  filter(Year==2016 & is.na(Employee_Name)==FALSE) %>% 
+  group_by(Employee_Name,job_code) %>%
+  summarize(Gross_Wages=sum(Gross_Wages,na.rm=TRUE)) %>% 
+  mutate(sum_by_emp=sum(Gross_Wages,na.rm=TRUE)) %>% 
+  ungroup() %>% 
+  mutate(perc=(Gross_Wages/sum_by_emp)*100) %>% 
+  
+  # These two variables clutter up the table, so I dump them.
+  
+  select(-c(Gross_Wages,sum_by_emp)) %>%
+  
+  # The arrange() here just helps put the job_codes in order from 001 to 012 after pivot_wider. It's   not absolutely necessary.
+  
+  arrange(job_code) %>% 
+  pivot_wider(names_from=job_code,values_from=perc,values_fill=list(perc=0.0)) %>% 
+  mutate(across(-c(Employee_Name), round,2)) %>% 
+  arrange(Employee_Name)  
+```
+
+Only thing to note for Question 8 is the `month(Pay_Date)` part, which we haven't yet learned about. Since I transformed `Pay_Date` into a date variable, I can use date functions like `month()` to extract information from a date. 
+
+```{r Q8}
+payroll_total %>% 
+  filter(Year==2015) %>% 
+  mutate(month=month(Pay_Date)) %>% 
+  group_by(month) %>% 
+  summarize(Gross_Wages=sum(Gross_Wages,na.rm=TRUE)) %>% 
+  ungroup() %>% 
+  mutate(Diff_from_Ave=Gross_Wages-mean(Gross_Wages))     
+```
+
