@@ -1,0 +1,244 @@
+---
+title: "Module_4"
+author: "George Batta"
+date: "3/24/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(DescTools)
+library(ggrepel)
+library(viridis)
+##
+bank_data<-as_tibble(read_xlsx('/Users/carstenjuliansavage/Desktop/R Working Directory/Accounting/Accounting Data Analytics/Data Files/Investment Portfolios/data/Analytics_mindset_case_studies_Bank_Investment_Portfolios.xlsx'),col_names=TRUE,sheet="Data") %>% filter(TA>0.0)
+
+
+```
+
+
+```{r In Class Exercise}
+SCALED <- function(x) {
+  (x-mean(x,na.rm=TRUE))/sd(x,na.rm=TRUE)
+}
+test <- bank_data %>% mutate(across(c(TLR:TCR),list(sc=SCALED)))
+test
+```
+
+```{r Q1, fig.height=6,fig.width=5,fig.align="center"}
+library(sqldf)
+DateCheck <- bank_data %>%
+  mutate(Year=substring(Date,1,4)) 
+sqldf("SELECT Year FROM DateCheck WHERE Year NOT LIKE '2%'") 
+#Checking to make sure that there are no weird dates
+sqldf("SELECT Year FROM DateCheck WHERE Year LIKE '2-'") 
+#Checking to make sure that there are no weird dates
+
+
+bank_data <- bank_data %>%
+  mutate(Year=substring(Date,1,4)) 
+bank_data$Year <- as.numeric(bank_data$Year)
+
+#Create common x axis scale
+x_scale <- scale_x_continuous(limits=range(bank_data$Year))
+
+GraphQ1A <- bank_data %>%
+  group_by(Year) %>%
+mutate(HTM_Mean=mean(HTM)) %>%
+mutate(AFS_Mean=mean(AFS)) %>%
+distinct(HTM_Mean,AFS_Mean) %>%
+arrange(Year) %>%
+ggplot() +
+ aes(x = Year, y = HTM_Mean) +
+ geom_line(size = 1L, colour = "blue") +
+ x_scale + 
+ geom_smooth(method="lm",se=FALSE, color="gray") +
+ xlab("") + ylab("Held to Maturity, Mean") + ggtitle("HTM & AFS Securities Increased 2009-2018") +
+ scale_x_continuous(breaks=seq(2009,2018, by=1)) + 
+ theme_minimal()
+
+GraphQ1B <- bank_data %>%
+  group_by(Year) %>%
+mutate(HTM_Mean=mean(HTM)) %>%
+mutate(AFS_Mean=mean(AFS)) %>%
+distinct(HTM_Mean,AFS_Mean) %>%
+arrange(Year) %>%
+ggplot() +
+ aes(x = Year, y = AFS_Mean) +
+ geom_line(size = 1L, colour = "blue") +
+ geom_smooth(method="lm",se=FALSE, color="gray") +
+ x_scale +
+ xlab("Year") + ylab("Available for Sale, Mean") + ggtitle("") +
+ scale_x_continuous(breaks=seq(2009,2018, by=1)) + 
+ theme_minimal()
+
+library(grid)
+grid.newpage()
+grid.draw(rbind(ggplotGrob(GraphQ1A),ggplotGrob(GraphQ1B),size="last"))
+
+```
+
+
+```{r Q2}
+bank_data <- bank_data %>%
+  mutate(Year=substring(Date,1,4)) 
+bank_data$Year <- as.numeric(bank_data$Year)
+
+x_scale <- scale_x_continuous(limits=range(bank_data$Year))
+
+bank_data %>%
+group_by(Bank_Type,Year)  %>%
+mutate(HTM_Percent=(sum(HTM)/sum(HTM,AFS))*100) %>%
+summarize(HTM_Percent) %>%
+distinct(HTM_Percent) %>%
+ggplot() +
+ aes(x = Year, y = HTM_Percent) +
+ geom_line(size = 1L, colour = "blue") +
+ geom_smooth(method="lm",se=FALSE, color="gray") +
+ x_scale + 
+ xlab("Year") + ylab("Average Percentage Change, HTM") + ggtitle("") +
+ scale_x_continuous(breaks=seq(2009,2018, by=1)) + 
+ theme_minimal()
+```
+
+```{r Q3, fig.height=6,fig.width=12,fig.align="center"}
+
+#RSSDIDFactor <- as.factor(c(35301,112837,210434,413208,451965,476810,480228,497404,504713,541101,817824,852218,1394676,1456501))
+
+pacman::p_load(directlabels)
+
+bank_data %>%
+group_by(RSSDID, Year)  %>%
+filter(Year > 2011) %>% 
+filter(Bank_Type=="Large bank") %>%
+summarize(HTM_Percent=(sum(HTM)/sum((HTM+AFS)))*100) %>%
+filter(Year != 2014) %>% filter(Year != 2015) %>% filter(Year != 2016) %>% filter(Year != 2017) %>%
+mutate(HTM_Percent_Change=HTM_Percent-lag(HTM_Percent,1)) %>%
+mutate(HTM_Percent_Change = round(HTM_Percent_Change, 2)) %>%
+na.omit() %>%
+ggplot(aes(x = Year, y = HTM_Percent_Change, group=RSSDID, color=RSSDID)) +
+ geom_line(size = 1L, colour = "blue") +
+ #geom_smooth(method="lm",se=FALSE) +
+ x_scale + 
+ xlab("Year") + ylab("Average HTM %") + ggtitle("HTM % from 2013 to 2018") + labs(color="RSSDID") +
+ scale_x_continuous(breaks=seq(2013,2018, by=5)) + facet_wrap(~RSSDID,nrow=1) + 
+ theme_minimal() +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  #geom_dl(aes(label = HTM_Percent_Change), method = list(dl.combine("first.points", "last.points")), cex = 0.8) 
+  geom_label_repel(aes(label = HTM_Percent_Change,
+                    fill = factor(RSSDID)), color = 'white',
+                    size = 3.5)
+
+```
+
+```{r Q4 All Banks, fig.height=4,fig.width=8,fig.align="center"}
+bank_data <- bank_data %>%
+  mutate(Year=substring(Date,1,4)) 
+bank_data$Year <- as.factor(bank_data$Year)
+
+GraphQ4A <- bank_data %>%
+#mutate(Year=substring(Date,1,4)) %>%
+mutate(Month=substring(Date,6,7)) %>%
+  mutate(Quarter=case_when(
+  Month=='03' ~ "Q1",
+  Month=='06' ~ "Q2",
+  Month=='09' ~ "Q3",
+  Month=='12' ~ "Q4")) %>%
+group_by(RSSDID, Year) %>%
+mutate(T1Rlag= T1R-lag(T1R,1)) %>%
+mutate(TCRlag= TCR-lag(TCR,1)) %>%
+  ungroup() %>%
+  group_by(Year,Quarter) %>%
+summarize(across(c(T1R,TCR,T1Rlag,TCRlag),mean,na.rm=TRUE)) %>%
+  ggplot() +
+ aes(x = Quarter, y = T1Rlag, group=1) +
+ geom_line(size = 1L, colour = "blue") +
+ #geom_smooth(method="lm",se=FALSE, color="gray") +
+ xlab("") + ylab("Diff. Avg. T1R") + ggtitle("Quarterly Changes in Capital Ratios - All Banks") +
+facet_wrap(~Year,scales="free_x",nrow=1) +
+ theme_minimal() +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+GraphQ4B <- bank_data %>%
+#mutate(Year=substring(Date,1,4)) %>%
+mutate(Month=substring(Date,6,7)) %>%
+  mutate(Quarter=case_when(
+  Month=='03' ~ "Q1",
+  Month=='06' ~ "Q2",
+  Month=='09' ~ "Q3",
+  Month=='12' ~ "Q4")) %>%
+group_by(RSSDID, Year) %>%
+mutate(T1Rlag= T1R-lag(T1R,1)) %>%
+mutate(TCRlag= TCR-lag(TCR,1)) %>%
+  ungroup() %>%
+  group_by(Year,Quarter) %>%
+summarize(across(c(T1R,TCR,T1Rlag,TCRlag),mean,na.rm=TRUE)) %>%
+  ggplot() +
+ aes(x = Quarter, y = TCRlag, group=1) +
+ geom_line(size = 1L, colour = "blue") +
+ #geom_smooth(method="lm",se=FALSE, color="gray") +
+ xlab("Quarter - Year") + ylab("Diff. Avg. TCR") + ggtitle("") +
+facet_wrap(~Year,scales="free_x",nrow=1) +
+ theme_minimal() +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+library(grid)
+grid.newpage()
+grid.draw(rbind(ggplotGrob(GraphQ4A),ggplotGrob(GraphQ4B),size="last"))
+```
+
+```{r Q4 Large and Small Banks, fig.height=4,fig.width=8,fig.align="center"}
+
+GraphQ4C <- bank_data %>%
+mutate(Year=substring(Date,1,4)) %>%
+mutate(Month=substring(Date,6,7)) %>%
+  mutate(Quarter=case_when(
+  Month=='03' ~ "Q1",
+  Month=='06' ~ "Q2",
+  Month=='09' ~ "Q3",
+  Month=='12' ~ "Q4")) %>%
+group_by(RSSDID, Year) %>%
+mutate(T1Rlag= T1R-lag(T1R,1)) %>%
+mutate(TCRlag= TCR-lag(TCR,1)) %>%
+  ungroup() %>%
+  group_by(Year,Quarter,Bank_Type) %>%
+summarize(across(c(T1R,TCR,T1Rlag,TCRlag),mean,na.rm=TRUE)) %>%
+  ggplot() +
+ aes(x = Quarter, y = T1Rlag, group=Bank_Type, color=Bank_Type) +
+ geom_line(size = 1L) +
+ #geom_smooth(method="lm",se=FALSE, color="gray") +
+ xlab("") + ylab("Diff. Avg. T1R") + ggtitle("Quarterly Changes in Capital Ratios - Large and Small Banks") + labs(color='Bank Type') +
+facet_wrap(~Year,scales="free_x",nrow=1) +
+ theme_minimal() +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position='top') 
+
+GraphQ4D <- bank_data %>%
+mutate(Year=substring(Date,1,4)) %>%
+mutate(Month=substring(Date,6,7)) %>%
+  mutate(Quarter=case_when(
+  Month=='03' ~ "Q1",
+  Month=='06' ~ "Q2",
+  Month=='09' ~ "Q3",
+  Month=='12' ~ "Q4")) %>%
+group_by(RSSDID, Year) %>%
+mutate(T1Rlag= T1R-lag(T1R,1)) %>%
+mutate(TCRlag= TCR-lag(TCR,1)) %>%
+  ungroup() %>%
+  group_by(Year,Quarter,Bank_Type) %>%
+summarize(across(c(T1R,TCR,T1Rlag,TCRlag),mean,na.rm=TRUE)) %>%
+  ggplot() +
+ aes(x = Quarter, y = TCRlag, color=Bank_Type, group=Bank_Type) +
+ geom_line(size = 1L) +
+ #geom_smooth(method="lm",se=FALSE, color="gray") +
+ xlab("Quarter - Year") + ylab("Diff. Avg. TCR") + ggtitle("") +
+facet_wrap(~Year,scales="free_x",nrow=1) +
+ theme_minimal() +
+ theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),legend.position='none') 
+
+library(grid)
+grid.newpage()
+grid.draw(rbind(ggplotGrob(GraphQ4C),ggplotGrob(GraphQ4D),size="last"))
+```
